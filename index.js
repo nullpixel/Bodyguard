@@ -13,14 +13,13 @@ const bot = {
 
 	pending_bans: {},
 	pending_kicks: {},
+	pending_softbans: {},
 
 	slowmode: false,
 	slowmode_last_users: {},
 
 	logignore: [],
 	logignore_report_channel: null,
-
-	triggers: [],
 
 	loadData: () => {
 		db.each("SELECT channelid FROM logignore_channels", (err, row) => {
@@ -113,6 +112,84 @@ const bot = {
 							bot.rules_channel.sendMessage(command_data.splice(2).join(" "));
 							message.author.sendMessage("**〔SUCCESS〕** Rules updated!");
 						});
+					}
+				}
+			}
+		},
+		softban: {
+			description: "softban a member",
+			args: ["user", "<reason=Read #rules.>"],
+			run: (command_data, message) => {
+				if(message.member.hasPermission("BAN_MEMBERS")) {
+					if(command_data[1] == "cancel") {
+						if(typeof command_data[2] !== "undefined") {
+							if(typeof bot.pending_softbans[command_data[2]] !== "undefined") {
+								clearTimeout(bot.pending_softbans[command_data[2]]);
+								message.channel.sendMessage(bot.formatResponseMessage(message.author, "**〔SUCCESS〕** Canceled softban" + command_data[2] + "`!"));
+							} else {
+								message.channel.sendMessage(bot.formatResponseMessage(message.author, "**〔ERROR〕** No pending softbans were found with unique token!"));
+							}
+						} else {
+							message.channel.sendMessage(bot.formatResponseMessage(message.author, "**〔ERROR〕** No unique token found!"));
+						}
+					} else {
+						var userId = message.content.match(/^!softban <@!?([0-9]+)>/);
+						var reason = typeof command_data[2] !== "undefined" ? command_data.splice(2).join(" ") : "Read #rules.";
+
+						if(userId !== null) {
+							client.fetchUser(userId[1]).then(user => {
+								var hasDuplicates = false;
+								message.member.guild.fetchMember(user).then(result => {
+									message.member.guild.members.every(member => {
+										if((member.nickname == user.username || member.user.username == result.user.username || (result.nickname == member.nickname && result.nickname != null && member.nickname != null)) && member.user.id != result.user.id) {
+											var random_token = chance.word({ length: 5 });
+
+											message.channel.sendMessage(bot.formatResponseMessage(message.author, "**〔WARNING〕** There is another member called `" + (member.nickname ? member.nickname : user.username) + "`. Softbanning user #" + user.discriminator + " (" + user.id + ") in 8 seconds, unless you do `!softban cancel " + random_token + "`."));
+
+											bot.pending_softbans[random_token] = setTimeout((user, message) => {
+												result.ban(7).then(() => {
+													message.channel.sendMessage(bot.formatResponseMessage(message.author, "**〔SUCCESS〕** Softbanned user " + user.username + "#" + user.discriminator + " (" + user.id + ")"));
+													user.sendMessage("**〔INFO〕** You have been kicked. Reason: `" + reason + "`");
+													bot.unbanMember(cleanID(mSplit[2]), message.channel.server.id, function (error) {
+                    									if (error) {
+                        									bot.reply(message, error);
+                        									return;
+                    									}
+                    								bot.reply(message, "I've unbanned: " + mSplit[2] + " from: " + message.channel.server.id);
+     												});
+												}).catch(rsp => {
+													message.channel.sendMessage(bot.formatResponseMessage(message.author, "**〔ERROR〕** Could not softban an user. Error: `" + JSON.parse(rsp.response.error.text).message.replace(/\.\.\./g, "") + "`"));
+												});
+											}, 8 * 1000, user, message); // 8 minutes
+
+											hasDuplicates = true;
+
+											return false; // break loop
+										}
+									});
+
+									if(!hasDuplicates) {
+										result.ban(7).then(() => {
+											message.channel.sendMessage(bot.formatResponseMessage(message.author, "**〔SUCCESS〕** Softbanned user " + user.username + "#" + user.discriminator + " (" + user.id + ")"));
+											user.sendMessage("**〔INFO〕** You have been kicked. Reason: `" + reason + "`");
+												bot.unbanMember(cleanID(mSplit[2]), message.channel.server.id, function (error) {
+                    								if (error) {
+                        								bot.reply(message, error);
+                        								return;
+                    								}
+                    							bot.reply(message, "I've unbanned: " + mSplit[2] + " from: " + message.channel.server.id);
+     											});
+										}).catch(rsp => {
+											message.channel.sendMessage(bot.formatResponseMessage(message.author, "**〔ERROR〕** Could not ban an user. Error: `" + JSON.parse(rsp.response.error.text).message.replace(/\.\.\./g, "") + "`"));
+										});
+									}
+								});
+							}).catch(() => {
+								message.channel.sendMessage(bot.formatResponseMessage(message.author, "**〔ERROR〕** An error occured, most likely user not found."));
+							});
+						} else {
+							message.channel.sendMessage(bot.formatResponseMessage(message.author, "**〔ERROR〕** User not found!"));
+						}
 					}
 				}
 			}
@@ -310,18 +387,6 @@ const bot = {
 					}
 				}
 			}
-		},
-		trigger: {
-			description: "make the bot to say something when a message contains desired word(s)",
-			args: ["trigger word(s)", "message"],
-			run: (command_data, message) => {
-				if(message.member.hasPermission("MANAGE_MESSAGES") && command_data.length >= 3) {
-					bot.triggers.push({
-						keywords: command_data[1].split(","),
-						message: command_data.splice(2).join(" ")
-					});
-				}
-			}
 		}
 	},
 
@@ -340,7 +405,7 @@ const bot = {
 	},
 
 	writeLog: (message) => {
-		var obj = require("./" + message.guild.name + "-logs.json");
+		var obj = require("./logs.json");
 		obj.push({
 			id: message.id,
 			user: {
@@ -356,7 +421,7 @@ const bot = {
 				name: message.channel.name
 			}
 		});
-		fs.writeFile("./" + message.guild.name + "-logs.json", JSON.stringify(obj), e => {
+		fs.writeFile("./logs.json", JSON.stringify(obj), e => {
 			if(e) {
 				console.error(e);
 				process.exit();
@@ -368,8 +433,8 @@ const bot = {
 		}
 	},
 
-	token: "bot_token_here",
-	guild_id: "guild_id_here"
+	token: "",
+	guild_id: ""
 };
 
 client.on("ready", () => {
@@ -380,56 +445,49 @@ client.on("ready", () => {
 
 client.on("message", message => {
 	if(typeof message.guild !== "undefined") {
-		if(message.guild !== null && message.member !== null && message.author !== null) {
-			if(message.guild.id == bot.guild_id) {
-				if(bot.slowmode === false || typeof bot.slowmode_last_users[message.author.id] === "undefined" || (new Date() - bot.slowmode_last_users[message.author.id]) >= bot.slowmode * 1000 || message.member.hasPermission("MANAGE_MESSAGES")) {
-					bot.slowmode_last_users[message.author.id] = new Date();
+	if (message.channel.type === 'dm') {
+		// hi
+	}
 
-					if(bot.slowmode) {
-						message.member.addRole("240339638722625537");
-						setTimeout(message => {
-							message.member.removeRole("240339638722625537");
-						}, bot.slowmode * 1000, message);
+	else if(message.guild.id == bot.guild_id) {
+			if(bot.slowmode === false || typeof bot.slowmode_last_users[message.author.id] === "undefined" || (new Date() - bot.slowmode_last_users[message.author.id]) >= bot.slowmode * 1000 || message.member.hasPermission("MANAGE_MESSAGES")) {
+				bot.slowmode_last_users[message.author.id] = new Date();
+
+				if(bot.approved_users.indexOf(message.author.id) === -1 && message.content !== "!rules accept" && message.author.id != client.user.id) {
+					if(bot.sent_approval_msg.indexOf(message.author.id) === -1) {
+						message.author.sendMessage("**〔ERROR〕** You have not accepted " + (bot.rules_channel === null ? "rules" : "<@" + bot.rules_channel.id + ">") + " yet. To accept rules, say `!rules accept` in the channel after you have read the rules.");
+
+						bot.sent_approval_msg.push(message.author.id);
+						db.run("INSERT INTO sent_users (userid) VALUES ('" + message.author.id + "')");
 					}
-
-					if(bot.approved_users.indexOf(message.author.id) === -1 && message.content !== "!rules accept" && message.author.id != client.user.id) {
-						if(bot.sent_approval_msg.indexOf(message.author.id) === -1) {
-							message.author.sendMessage("**〔ERROR〕** You have not accepted " + (bot.rules_channel === null ? "rules" : "<@" + bot.rules_channel.id + ">") + " yet. To accept rules, say `!rules accept` in the channel after you have read the rules.");
-
-							bot.sent_approval_msg.push(message.author.id);
-							db.run("INSERT INTO sent_users (userid) VALUES ('" + message.author.id + "')");
-						}
-						message.delete();
-					} else if(bot.rules_channel != null && message.content.split(" ")[0] !== "!rules") {
-						if(message.channel.id == bot.rules_channel.id && message.author.id != client.user.id)
-							message.delete();
-					}
-
-					if(message.content.substr(0, 1) === "!") {
-						bot.handleCommand(message);
-					}
-				} else {
 					message.delete();
+				} else if(bot.rules_channel != null && message.content.split(" ")[0] !== "!rules") {
+					if(message.channel.id == bot.rules_channel.id && message.author.id != client.user.id)
+						message.delete();
 				}
 
-				if(bot.logignore_report_channel !== null) {
-					if(bot.logignore.indexOf(message.channel.id) === -1 && message.channel.id != bot.logignore_report_channel.id) {
-						fs.exists(message.guild.name + "-logs.json", (m) => {
-							if(!m) {
-								fs.writeFile(message.guild.name + "-logs.json", "[]", { flag: "wx" }, e => {
-									if(e) {
-										console.error(e);
-										process.exit();
-									} else {
-										bot.writeLog(message);
-									}
-								});
+				if(message.content.substr(0, 1) === "!") {
+					bot.handleCommand(message);
+				}
+			} else {
+				message.delete();
+			}
+
+			if(bot.logignore.indexOf(message.channel.id) === -1 && message.channel.id != bot.logignore_report_channel.id) {
+				fs.exists("logs.json", (m) => {
+					if(!m) {
+						fs.writeFile("logs.json", "[]", { flag: "wx" }, e => {
+							if(e) {
+								console.error(e);
+								process.exit();
 							} else {
 								bot.writeLog(message);
 							}
 						});
+					} else {
+						bot.writeLog(message);
 					}
-				}
+				});
 			}
 		}
 	}
