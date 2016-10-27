@@ -86,6 +86,17 @@ const bot = {
 				message.channel.sendMessage(bot.formatResponseMessage(message.author, "Pong!"));
 			}
 		},
+                slap: {
+                        description: "slap a user",
+                        args: ["user"],
+                        run: (command_data, message) => {
+				var user = message.mentions.users.first();
+				if(user !== null) {
+                               		message.channel.sendMessage(user + " was slapped violently :boom:");
+				}
+                    }
+
+                },
 		rules: {
 			description: "do things with rules",
 			args: ["action"],
@@ -340,7 +351,7 @@ const bot = {
 	},
 
 	writeLog: (message) => {
-		var obj = require("./" + message.guild.name + "-logs.json");
+		var obj = require("./logs.json");
 		obj.push({
 			id: message.id,
 			user: {
@@ -356,7 +367,7 @@ const bot = {
 				name: message.channel.name
 			}
 		});
-		fs.writeFile("./" + message.guild.name + "-logs.json", JSON.stringify(obj), e => {
+		fs.writeFile("./logs.json", JSON.stringify(obj), e => {
 			if(e) {
 				console.error(e);
 				process.exit();
@@ -368,8 +379,8 @@ const bot = {
 		}
 	},
 
-	token: "bot_token_here",
-	guild_id: "guild_id_here"
+	token: "",
+	guild_id: ""
 };
 
 client.on("ready", () => {
@@ -385,12 +396,6 @@ client.on("message", message => {
 				if(bot.slowmode === false || typeof bot.slowmode_last_users[message.author.id] === "undefined" || (new Date() - bot.slowmode_last_users[message.author.id]) >= bot.slowmode * 1000 || message.member.hasPermission("MANAGE_MESSAGES")) {
 					bot.slowmode_last_users[message.author.id] = new Date();
 
-					if(bot.slowmode) {
-						message.member.addRole("240339638722625537");
-						setTimeout(message => {
-							message.member.removeRole("240339638722625537");
-						}, bot.slowmode * 1000, message);
-					}
 
 					if(bot.approved_users.indexOf(message.author.id) === -1 && message.content !== "!rules accept" && message.author.id != client.user.id) {
 						if(bot.sent_approval_msg.indexOf(message.author.id) === -1) {
@@ -414,9 +419,9 @@ client.on("message", message => {
 
 				if(bot.logignore_report_channel !== null) {
 					if(bot.logignore.indexOf(message.channel.id) === -1 && message.channel.id != bot.logignore_report_channel.id) {
-						fs.exists(message.guild.name + "-logs.json", (m) => {
+						fs.exists("logs.json", (m) => {
 							if(!m) {
-								fs.writeFile(message.guild.name + "-logs.json", "[]", { flag: "wx" }, e => {
+								fs.writeFile("logs.json", "[]", { flag: "wx" }, e => {
 									if(e) {
 										console.error(e);
 										process.exit();
